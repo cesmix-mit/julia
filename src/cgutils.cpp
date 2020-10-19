@@ -1375,7 +1375,7 @@ std::vector<unsigned> first_ptr(Type *T)
                 num_elements = AT->getNumElements();
             else {
                 VectorType *VT = cast<VectorType>(T);
-#if JL_LLVM_VERSION >= 12000
+#if JL_LLVM_VERSION >= 120000
                 ElementCount EC = VT->getElementCount();
                 num_elements = EC.getKnownMinValue();
 #else
