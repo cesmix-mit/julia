@@ -337,6 +337,9 @@ USE_POLLY := 0
 USE_POLLY_OPENMP := 0  # Enable OpenMP code-generation
 USE_POLLY_ACC := 0     # Enable GPU code-generation
 
+# Option to enable experimental Tapir support
+USE_TAPIR := 0
+
 # Options to use MLIR
 USE_MLIR := 0
 
@@ -644,6 +647,12 @@ include $(JULIAHOME)/$(MAKE_USER_FNAME)
 endif
 ifeq (exists, $(shell [ -e $(BUILDROOT)/$(MAKE_USER_FNAME) ] && echo exists ))
 include $(BUILDROOT)/$(MAKE_USER_FNAME)
+endif
+
+# Tapir requires building LLVM from source:
+ifeq ($(USE_TAPIR), 1)
+USE_BINARYBUILDER_LLVM := 0
+LLVM_VER := svn
 endif
 
 # A bit of a kludge to work around libraries linking to FreeBSD's outdated system libgcc_s

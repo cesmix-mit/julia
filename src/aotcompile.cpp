@@ -24,6 +24,9 @@
 #include <llvm/Transforms/Instrumentation/ThreadSanitizer.h>
 #include <llvm/Transforms/Scalar/GVN.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
+#ifdef USE_TAPIR
+#include <llvm/Transforms/Tapir.h>
+#endif
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar/InstSimplifyPass.h>
 #if defined(USE_POLLY)
@@ -600,7 +603,11 @@ void jl_dump_native(void *native_code,
 
 void addTargetPasses(legacy::PassManagerBase *PM, TargetMachine *TM)
 {
-    PM->add(new TargetLibraryInfoWrapperPass(Triple(TM->getTargetTriple())));
+    TargetLibraryInfoImpl TLII(Triple(TM->getTargetTriple()));
+#ifdef USE_TAPIR
+    TLII.setTapirTarget(jl_tapir_target_factory);
+#endif
+    PM->add(new TargetLibraryInfoWrapperPass(TLII));
     PM->add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
 }
 
@@ -742,6 +749,12 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level,
     PM->add(createCFGSimplificationPass());
     PM->add(createLoopDeletionPass());
     PM->add(createInstructionCombiningPass());
+#ifdef USE_TAPIR
+    PM->add(createLoopSpawningTIPass());
+    PM->add(createCFGSimplificationPass());
+    PM->add(createInstructionCombiningPass());
+    PM->add(createLoopDeletionPass());
+#endif
     PM->add(createLoopVectorizePass());
     PM->add(createLoopLoadEliminationPass());
     PM->add(createCFGSimplificationPass());
@@ -751,6 +764,18 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level,
 
     PM->add(createAggressiveDCEPass());
 
+#ifdef USE_TAPIR
+#ifdef JL_DEBUG_BUILD
+    PM->add(createVerifierPass(false));
+#endif
+    PM->add(createLowerTapirToTargetPass());
+#ifdef JL_DEBUG_BUILD
+    PM->add(createVerifierPass(false));
+#endif
+    PM->add(createAlwaysInlinerLegacyPass()); // Respect always_inline
+    PM->add(createDeadCodeEliminationPass());
+    PM->add(createCFGSimplificationPass());
+#endif
     if (lower_intrinsics) {
         // LowerPTLS removes an indirect call. As a result, it is likely to trigger
         // LLVM's devirtualization heuristics, which would result in the entire

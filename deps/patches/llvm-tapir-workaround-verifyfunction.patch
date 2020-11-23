@@ -1,0 +1,26 @@
+From 99619d1a12cf7d624a1ed9dc8698510b7bc0f199 Mon Sep 17 00:00:00 2001
+From: Takafumi Arakaki <aka.tkf@gmail.com>
+Date: Tue, 10 Nov 2020 05:33:28 -0500
+Subject: [PATCH] Workaround: null out debug information for verifyFunction
+
+---
+ lib/Transforms/Tapir/Outline.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/lib/Transforms/Tapir/Outline.cpp b/lib/Transforms/Tapir/Outline.cpp
+index 9a5b7016482..47d797414f6 100644
+--- a/lib/Transforms/Tapir/Outline.cpp
++++ b/lib/Transforms/Tapir/Outline.cpp
+@@ -368,6 +368,9 @@ Function *llvm::CreateHelper(
+     Instruction *NewSR = InputSyncRegion->clone();
+     if (InputSyncRegion->hasName())
+       NewSR->setName(InputSyncRegion->getName()+NameSuffix);
++    // [Workaround for now] To produce `verifyFunction`-compliant output, null
++    // out old debug information copied to the new sync region:
++    NewSR->setMetadata(LLVMContext::MD_dbg, nullptr);
+     NewEntry->getInstList().push_back(NewSR);
+     VMap[InputSyncRegion] = NewSR;
+   }
+-- 
+2.17.1
+

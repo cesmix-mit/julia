@@ -1,0 +1,139 @@
+From ba6e5144811319cf5c925bb00a5076d61b8986cb Mon Sep 17 00:00:00 2001
+From: Takafumi Arakaki <aka.tkf@gmail.com>
+Date: Wed, 11 Nov 2020 20:02:28 -0500
+Subject: [PATCH] Do not treat ptls as an input
+
+---
+ lib/Transforms/Tapir/LoweringUtils.cpp | 83 +++++++++++++++++++++++++-
+ 1 file changed, 81 insertions(+), 2 deletions(-)
+
+diff --git a/lib/Transforms/Tapir/LoweringUtils.cpp b/lib/Transforms/Tapir/LoweringUtils.cpp
+index 54fe4668c762..c69c490a53c3 100644
+--- a/lib/Transforms/Tapir/LoweringUtils.cpp
++++ b/lib/Transforms/Tapir/LoweringUtils.cpp
+@@ -67,6 +67,72 @@ TapirTarget *llvm::getTapirTargetFromID(Module &M, TapirTargetID ID) {
+   }
+ }
+ 
++static bool isReturnedFrom(const Value *V, const Function *F) {
++  if (!F)
++    return false;
++  // Following branches must be consistent with `materializePtlsUser`:
++  if (auto *I = dyn_cast<CallInst>(V)) {
++    return I->getCalledOperand() == F;
++  } else if (auto *I = dyn_cast<BitCastInst>(V)) {
++    return isReturnedFrom(I->getOperand(0), F);
++  } else if (auto *I = dyn_cast<GetElementPtrInst>(V)) {
++    return isReturnedFrom(I->getPointerOperand(), F);
++  }
++  return false;
++}
++
++class JuliaValueMaterializer final : public ValueMaterializer {
++private:
++  Function *ptls_getter;
++  Instruction *ptls;
++  SmallVector<Instruction*, 4> instructions;
++
++  Value *materializePtlsUser(Value *V) {
++    Instruction *NewI;
++    // Following branches must be consistent with `isReturnedFrom`:
++    if (isa<CallInst>(V)) {
++      return ptls;
++    } else if (auto *I = dyn_cast<BitCastInst>(V)) {
++      NewI = new BitCastInst(materializePtlsUser(I->getOperand(0)),
++                             V->getType(), I->getName());
++    } else if (auto *I = dyn_cast<GetElementPtrInst>(V)) {
++      SmallVector<Value *, 8> IdxList;
++      IdxList.reserve(I->getNumIndices());
++      for (size_t i = 0; i < I->getNumIndices(); i++) {
++        IdxList.push_back(I->getOperand(i + 1));
++      }
++      NewI = GetElementPtrInst::Create(
++          I->getSourceElementType(),
++          materializePtlsUser(I->getPointerOperand()), IdxList, I->getName());
++    }
++    assert(NewI && "failed to materialize ptls user; incompatibility with "
++                   "`isReturnedFrom`?");
++    instructions.push_back(NewI);
++    return NewI;
++  }
++
++public:
++  JuliaValueMaterializer(Function &F) {
++    Module *M = F.getParent();
++    ptls_getter = M->getFunction("julia.ptls_states");
++    ptls = CallInst::Create(ptls_getter, {}, "");
++  }
++
++  Value *materialize(Value *V) final {
++    if (!isReturnedFrom(V, ptls_getter))
++      return nullptr;
++    return materializePtlsUser(V);
++  }
++
++  void maybeInsertPtls(Function *F) {
++    BasicBlock &B = F->getEntryBlock();
++    auto Iter = B.getFirstNonPHI()->getIterator();
++    B.getInstList().insert(Iter, ptls);
++    for (auto I: instructions)
++      B.getInstList().insert(Iter, I);
++  }
++};
++
+ //----------------------------------------------------------------------------//
+ // Lowering utilities for Tapir tasks.
+ 
+@@ -213,7 +279,16 @@ static bool definedOutsideTaskFrame(const Value *V, const Spindle *TF,
+ 
+   // If V is an instruction, check if TFSpindles contains it.
+   if (const Instruction *I = dyn_cast<Instruction>(V))
++  {
++    // If the value is a (bitcast of) ptls, don't treat it as the task input:
++    auto M = I->getParent()->getParent()->getParent();
++    auto ptls_getter = M->getFunction("julia.ptls_states");
++    // TODO: hoist out `getFunction`?
++    if (isReturnedFrom(V, ptls_getter))
++      return false;
++
+     return !taskFrameContains(TF, I->getParent(), TI);
++  }
+ 
+   return false;
+ }
+@@ -656,13 +731,15 @@ Function *llvm::createHelperForTask(
+   NamedRegionTimer NRT("CreateHelper", "Create helper function",
+                        TimerGroupName, TimerGroupDescription,
+                        TimePassesIsEnabled);
++  JuliaValueMaterializer Materializer(F);
+   Helper =
+     CreateHelper(Args, Outputs, TaskBlocks, Header, Entry, DI->getContinue(),
+                  VMap, DestM, F.getSubprogram() != nullptr, Returns,
+                  NameSuffix.str(), &ReattachBlocks, &TaskResumeBlocks,
+                  &SharedEHEntries, nullptr, nullptr,
+                  dyn_cast<Instruction>(DI->getSyncRegion()), ReturnType,
+-                 nullptr, nullptr, nullptr);
++                 nullptr, nullptr, &Materializer);
++  Materializer.maybeInsertPtls(Helper);
+   }
+   assert(Returns.empty() && "Returns cloned when cloning detached CFG.");
+ 
+@@ -839,12 +916,14 @@ Function *llvm::createHelperForTaskFrame(
+   NamedRegionTimer NRT("CreateHelper", "Create helper function",
+                        TimerGroupName, TimerGroupDescription,
+                        TimePassesIsEnabled);
++  JuliaValueMaterializer Materializer(F);
+   Helper =
+     CreateHelper(Args, Outputs, TaskBlocks, Header, Entry, Continue,
+                  VMap, DestM, F.getSubprogram() != nullptr, Returns,
+                  NameSuffix.str(), &TFEndBlocks, &TFResumeBlocks,
+                  &SharedEHEntries, nullptr, nullptr, nullptr, ReturnType,
+-                 nullptr, nullptr, nullptr);
++                 nullptr, nullptr, &Materializer);
++  Materializer.maybeInsertPtls(Helper);
+   } // end timed region
+   assert(Returns.empty() && "Returns cloned when cloning detached CFG.");
+ 
+-- 
+2.17.1
+

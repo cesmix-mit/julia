@@ -1257,6 +1257,49 @@ function abstract_eval_ssavalue(s::SSAValue, src::CodeInfo)
     return typ
 end
 
+# If `stmt` is `x[]` where `x` is of type `Base.Tapir.Output`, return the type
+# of `v` in `x[] = v`; otherwise, return `nothing`. Since `x` must be set
+# before `SyncNode` for a valid program, its type information should be
+# available by the time this function is called.
+# TODO: maybe just make `fetch` work
+# TODO: insert runtime type assersion
+# TODO: avoid linear scan
+function try_abstract_eval_task_output(stmt::Expr, src::CodeInfo)
+    stmt.head === :call && length(stmt.args) == 2 || return
+    r, s = stmt.args
+    r isa GlobalRef || return
+    s isa SlotNumber || return
+    isdefined(Main, :Base) || return
+    Base = Main.Base
+    r.mod === Base && r.name === :getindex || return
+
+    isdefined(Base, :Tapir) || return
+    Tapir = Base.Tapir
+    for (i, e) in enumerate(src.code)
+        isexpr(e, :(=)) && length(e.args) == 2 || continue
+        lhs, _ = e.args
+        if lhs === s
+            src.ssavaluetypes[i] === Tapir.Output || return
+            @goto found
+        end
+    end
+    return
+    @label found
+
+    setindex_ref = GlobalRef(Base, :setindex!)
+    t = Union{}
+    for e in src.code
+        isexpr(e, :call) && length(e.args) == 3 || continue
+        f, x, y = e.args
+        f === setindex_ref || continue
+        x === s || continue
+        y isa SSAValue || continue
+        t = tmerge(t, abstract_eval_ssavalue(y, src))
+    end
+    t === Union{} && return  # or should we just return it as-is?
+    return t
+end
+
 # make as much progress on `frame` as possible (without handling cycles)
 function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
     @assert !frame.inferred
@@ -1290,6 +1333,21 @@ function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
                 changes[sn] = VarState(Bottom, true)
             elseif isa(stmt, GotoNode)
                 pc´ = (stmt::GotoNode).label
+            elseif isa(stmt, DetachNode)
+                # A detach node has two edges we need to add
+                # the reattach edge to the work queue
+                l = (stmt::DetachNode).reattach
+                newstate_reattach = stupdate!(s[l], changes)
+                if newstate_reattach !== false
+                    if l < frame.pc´´
+                        frame.pc´´ = l
+                    end
+                    push!(W, l)
+                    s[l] = newstate_reattach
+                end
+                pc´ = (stmt::DetachNode).label
+            elseif isa(stmt, ReattachNode)
+                pc´ = (stmt::ReattachNode).label
             elseif isa(stmt, GotoIfNot)
                 condt = abstract_eval_value(interp, stmt.cond, s[pc], frame)
                 if condt === Bottom
@@ -1380,8 +1438,11 @@ function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
                     if isa(fname, Slot)
                         changes = StateUpdate(fname, VarState(Any, false), changes)
                     end
-                elseif hd === :inbounds || hd === :meta || hd === :loopinfo || hd === :code_coverage_effect
+                elseif hd === :inbounds || hd === :meta || hd === :loopinfo || hd === :code_coverage_effect ||
+                       (stmt isa SyncNode)
                     # these do not generate code
+                elseif hd === :call && (tout = try_abstract_eval_task_output(stmt, frame.src)) !== nothing
+                    frame.src.ssavaluetypes[pc] = t = tout
                 else
                     t = abstract_eval_statement(interp, stmt, changes, frame)
                     t === Bottom && break

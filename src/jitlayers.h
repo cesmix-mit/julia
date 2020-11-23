@@ -248,3 +248,8 @@ static inline bool isIntrinsicFunction(Function *F)
 }
 
 CodeGenOpt::Level CodeGenOptLevelFor(int optlevel);
+
+#ifdef USE_TAPIR
+#include "llvm/Transforms/Tapir/LoweringUtils.h"
+llvm::TapirTarget *jl_tapir_target_factory(Module &);
+#endif

@@ -2,7 +2,11 @@
 include $(SRCDIR)/llvm-ver.make
 
 ifneq ($(USE_BINARYBUILDER_LLVM), 1)
+ifneq ($(USE_TAPIR),1)
 LLVM_GIT_URL ?= https://github.com/llvm/llvm-project.git
+else
+LLVM_GIT_URL ?= https://github.com/OpenCilk/opencilk-project.git
+endif
 
 ifeq ($(BUILD_LLDB), 1)
 BUILD_LLVM_CLANG := 1
@@ -54,6 +58,20 @@ LLVM_ENABLE_PROJECTS := $(LLVM_ENABLE_PROJECTS);mlir
 endif
 ifeq ($(USE_RV), 1)
 LLVM_EXTERNAL_PROJECTS := $(LLVM_EXTERNAL_PROJECTS);rv
+endif
+
+ifeq ($(USE_TAPIR),1)
+ifeq ($(USE_SYSTEM_LLVM),0)
+ifneq ($(LLVM_VER),svn)
+$(error USE_TAPIR=1 requires LLVM_VER=svn)
+else
+LLVM_GIT_VER ?= 48265098754b785d1b06cb08d8e22477a003efcd
+# opencilk/beta3: https://github.com/OpenCilk/opencilk-project/commit/48265098754b785d1b06cb08d8e22477a003efcd
+
+LLVM_VER_SHORT=9.0
+# LLVM_VER_PATH=0 # Not used?
+endif
+endif
 endif
 
 include $(SRCDIR)/llvm-options.mk
@@ -383,7 +401,7 @@ else
 	([ ! -d $(LLVM_MONOSRC_DIR) ] && \
 		git clone --dissociate --reference $(LLVM_BARESRC_DIR) $(LLVM_GIT_URL) $(LLVM_MONOSRC_DIR) ) || \
 		(cd $(LLVM_MONOSRC_DIR) && \
-		git pull --ff-only)
+		git checkout -- .)
 ifneq ($(LLVM_GIT_VER),)
 	(cd $(LLVM_MONOSRC_DIR) && \
 		git checkout $(LLVM_GIT_VER))
@@ -471,6 +489,13 @@ $(eval $(call LLVM_PATCH,llvm-julia-tsan-custom-as))
 $(eval $(call LLVM_PATCH,llvm-9.0-D85499)) # landed as D85553
 $(eval $(call LLVM_PATCH,llvm-D80101)) # remove for LLVM 12
 $(eval $(call LLVM_PATCH,llvm-D84031)) # remove for LLVM 12
+ifeq ($(USE_TAPIR),1)
+# https://github.com/OpenCilk/opencilk-project/pull/26
+$(eval $(call LLVM_PATCH,llvm-tapir-settapirtarget))
+$(eval $(call LLVM_PATCH,llvm-tapir-workaround-verifyfunction))
+$(eval $(call LLVM_PATCH,llvm-tapir-newhelpers-push_back))
+$(eval $(call LLVM_PATCH,llvm-tapir-materializer))
+endif
 endif # LLVM_VER 9.0
 
 ifeq ($(LLVM_VER_SHORT),10.0)

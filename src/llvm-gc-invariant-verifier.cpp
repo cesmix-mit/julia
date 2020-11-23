@@ -86,6 +86,8 @@ void GCInvariantVerifier::visitAddrSpaceCastInst(AddrSpaceCastInst &I) {
 void GCInvariantVerifier::visitStoreInst(StoreInst &SI) {
     Type *VTy = SI.getValueOperand()->getType();
     if (VTy->isPointerTy()) {
+        if (SI.getMetadata("julia.tapir.store"))
+            return;
         /* We currently don't obey this for arguments. That's ok - they're
            externally rooted. */
         unsigned AS = cast<PointerType>(VTy)->getAddressSpace();

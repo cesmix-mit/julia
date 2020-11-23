@@ -23,6 +23,9 @@
 #include <llvm/Pass.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Transforms/Utils/PromoteMemToReg.h>
+#ifdef USE_TAPIR
+#include "llvm/Analysis/TapirTaskInfo.h"
+#endif
 
 #if JL_LLVM_VERSION >= 100000
 #include <llvm/InitializePasses.h>
@@ -121,6 +124,10 @@ struct AllocOpt : public FunctionPass, public JuliaPassContext {
 
     Type *T_int64;
 
+#ifdef USE_TAPIR
+    TaskInfo *taskinfo;
+#endif
+
 private:
     bool doInitialization(Module &m) override;
     bool runOnFunction(Function &F) override;
@@ -129,6 +136,9 @@ private:
         FunctionPass::getAnalysisUsage(AU);
         AU.addRequired<DominatorTreeWrapperPass>();
         AU.addPreserved<DominatorTreeWrapperPass>();
+#ifdef USE_TAPIR
+        AU.addRequired<TaskInfoWrapperPass>();
+#endif
         AU.setPreservesCFG();
     }
 };
@@ -1482,6 +1492,10 @@ cleanup:
     for (auto &slot: slots) {
         if (!slot.isref)
             continue;
+#ifdef USE_TAPIR
+        if (!pass.taskinfo->isAllocaParallelPromotable(slot.slot))
+            continue;
+#endif
         PromoteMemToReg({slot.slot}, getDomTree());
     }
 }
@@ -1506,6 +1520,9 @@ bool AllocOpt::runOnFunction(Function &F)
 {
     if (!alloc_obj_func)
         return false;
+#ifdef USE_TAPIR
+    taskinfo = &getAnalysis<TaskInfoWrapperPass>().getTaskInfo();
+#endif
     Optimizer optimizer(F, *this);
     optimizer.initialize();
     optimizer.optimizeAll();

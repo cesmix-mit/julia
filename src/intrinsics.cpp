@@ -1185,10 +1185,10 @@ static Value *emit_untyped_intrinsic(jl_codectx_t &ctx, intrinsic f, Value **arg
 
     case shl_int: {
         Value *the_shl = ctx.builder.CreateShl(x, uint_cnvt(ctx, t, y));
-        if (ConstantInt::isValueValidForType(y->getType(), t->getPrimitiveSizeInBits())) {
+        uint64_t nb = t->getPrimitiveSizeInBits();
+        if (ConstantInt::isValueValidForType(y->getType(), nb)) {
             return ctx.builder.CreateSelect(
-                    ctx.builder.CreateICmpUGE(y, ConstantInt::get(y->getType(),
-                                                                  t->getPrimitiveSizeInBits())),
+                    ctx.builder.CreateICmpUGE(y, ConstantInt::get(y->getType(), nb)),
                     ConstantInt::get(t, 0),
                     the_shl);
         }
@@ -1198,10 +1198,10 @@ static Value *emit_untyped_intrinsic(jl_codectx_t &ctx, intrinsic f, Value **arg
     }
     case lshr_int: {
         Value *the_shr = ctx.builder.CreateLShr(x, uint_cnvt(ctx, t, y));
-        if (ConstantInt::isValueValidForType(y->getType(), t->getPrimitiveSizeInBits())) {
+        uint64_t nb = t->getPrimitiveSizeInBits();
+        if (ConstantInt::isValueValidForType(y->getType(), nb)) {
             return ctx.builder.CreateSelect(
-                    ctx.builder.CreateICmpUGE(y, ConstantInt::get(y->getType(),
-                                                                  t->getPrimitiveSizeInBits())),
+                    ctx.builder.CreateICmpUGE(y, ConstantInt::get(y->getType(), nb)),
                     ConstantInt::get(t, 0),
                     the_shr);
         }
@@ -1211,11 +1211,11 @@ static Value *emit_untyped_intrinsic(jl_codectx_t &ctx, intrinsic f, Value **arg
     }
     case ashr_int: {
         Value *the_shr = ctx.builder.CreateAShr(x, uint_cnvt(ctx, t, y));
-        if (ConstantInt::isValueValidForType(y->getType(), t->getPrimitiveSizeInBits())) {
+        uint64_t nb = t->getPrimitiveSizeInBits();
+        if (ConstantInt::isValueValidForType(y->getType(), nb)) {
             return ctx.builder.CreateSelect(
-                    ctx.builder.CreateICmpUGE(y, ConstantInt::get(y->getType(),
-                                                                  t->getPrimitiveSizeInBits())),
-                    ctx.builder.CreateAShr(x, ConstantInt::get(t, t->getPrimitiveSizeInBits() - 1)),
+                    ctx.builder.CreateICmpUGE(y, ConstantInt::get(y->getType(), nb)),
+                    ctx.builder.CreateAShr(x, ConstantInt::get(t, nb - 1)),
                     the_shr);
         }
         else {
